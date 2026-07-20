@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
+const Teacher = require('../models/Teacher');
+const Employee = require('../models/Employee');
 
 
 exports.register = async (req, res) => {
@@ -8,17 +10,19 @@ exports.register = async (req, res) => {
     const { fullName, email, password, phone, role } = req.body;
 
     const userExists = await User.findOne({ email });
+
     if (userExists) {
       return res.status(400).json({ message: 'User already exists' });
     }
 
-    const user = await User.create({
-      fullName,
-      email,
-      password,
-      phone,
-      role,
-    });
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = await User.create({ fullName, email, password: hashedPassword, phone, role });
+
+    if (role === 'teacher') {
+      await Teacher.create({ user: user._id, nationalId: req.body.nationalId });
+    } else if (role === 'employee') {
+      await Employee.create({ user: user._id, nationalId: req.body.nationalId });
+    }
 
     res.status(201).json({
       message: 'User registered successfully',
@@ -39,6 +43,7 @@ exports.login = async (req, res) => {
     const { email, password } = req.body;
 
     const user = await User.findOne({ email });
+
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -84,11 +89,25 @@ exports.logout = (req, res) => {
 exports.profile = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select('-password');
+
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    res.status(200).json({ user });
+    let profileData = null;
+    if (user.role === 'teacher') {
+      profileData = await Teacher.findOne({ user: user._id });
+    } else if (user.role === 'employee') {
+      profileData = await Employee.findOne({ user: user._id });
+    }
+
+    // Include the profileData inside the returned user object
+    const responseUser = {
+      ...user.toObject(),
+      profileData
+    };
+
+    res.status(200).json({ user: responseUser });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
